@@ -152,17 +152,6 @@ check_docker_compose() {
 ensure_packages() {
     log_info "\nШаг 1: проверка и установка системных зависимостей"
     
-    # Установка distutils для совместимости
-    if ! python3 -c "import distutils" 2>/dev/null; then
-        log_info "Установка python3-distutils для совместимости..."
-        export DEBIAN_FRONTEND=noninteractive
-        export DEBCONF_NONINTERACTIVE_SEEN=true
-        sudo apt-get update
-        sudo apt-get install -y --no-install-recommends python3-distutils
-        unset DEBIAN_FRONTEND
-        unset DEBCONF_NONINTERACTIVE_SEEN
-    fi
-    
     declare -A packages=(
         [git]='git'
         [docker]='docker.io'
