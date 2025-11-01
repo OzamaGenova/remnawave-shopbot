@@ -152,6 +152,9 @@ check_docker_compose() {
 ensure_packages() {
     log_info "\nШаг 1: проверка и установка системных зависимостей"
     
+    # В Ubuntu 24.04 python3-distutils больше не доступен, поэтому пропускаем его установку
+    # Вместо этого сразу устанавливаем новый docker-compose который не требует distutils
+    
     declare -A packages=(
         [git]='git'
         [docker]='docker.io'
@@ -184,7 +187,7 @@ ensure_packages() {
         log_info "Все необходимые пакеты уже присутствуют."
     fi
     
-    # Проверяем и устанавливаем Docker Compose
+    # Проверяем и устанавливаем Docker Compose (новую версию которая не требует distutils)
     check_docker_compose
 }
 
