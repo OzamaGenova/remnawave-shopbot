@@ -101,6 +101,7 @@ install_docker_compose() {
     if dpkg -l | grep -q docker-compose; then
         log_info "Удаление старой версии docker-compose..."
         sudo apt-get remove -y docker-compose
+        sudo rm -f /usr/bin/docker-compose
     fi
     
     # Устанавливаем последнюю версию Docker Compose
@@ -116,6 +117,36 @@ install_docker_compose() {
     sudo ln -sf /usr/local/bin/docker-compose /usr/bin/docker-compose
     
     log_success "✔ Docker Compose v${DOCKER_COMPOSE_VERSION} установлен"
+}
+
+check_docker_compose() {
+    if ! command -v docker-compose >/dev/null 2>&1; then
+        log_warn "Docker Compose не найден. Устанавливаем..."
+        install_docker_compose
+        return
+    fi
+    
+    # Проверяем работает ли docker-compose
+    if ! docker-compose --version >/dev/null 2>&1; then
+        log_warn "Docker Compose не работает. Переустанавливаем..."
+        install_docker_compose
+        return
+    fi
+    
+    # Проверяем версию и предлагаем обновление если старая
+    local current_version
+    current_version=$(docker-compose --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+    local latest_version
+    latest_version=$(curl -fsSL https://api.github.com/repos/docker/compose/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+    
+    if [[ "$current_version" != "$latest_version" ]]; then
+        log_warn "Установлена старая версия Docker Compose (v$current_version). Доступна v$latest_version"
+        if confirm "Обновить Docker Compose? (y/n): "; then
+            install_docker_compose
+        fi
+    else
+        log_success "✔ Docker Compose v$current_version уже установлен и работает."
+    fi
 }
 
 ensure_packages() {
@@ -164,25 +195,8 @@ ensure_packages() {
         log_info "Все необходимые пакеты уже присутствуют."
     fi
     
-    # Устанавливаем Docker Compose отдельно
-    if ! command -v docker-compose >/dev/null 2>&1; then
-        install_docker_compose
-    else
-        # Проверяем версию и предлагаем обновление если старая
-        local current_version
-        current_version=$(docker-compose --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
-        local latest_version
-        latest_version=$(curl -fsSL https://api.github.com/repos/docker/compose/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
-        
-        if [[ "$current_version" != "$latest_version" ]]; then
-            log_warn "Установлена старая версия Docker Compose (v$current_version). Доступна v$latest_version"
-            if confirm "Обновить Docker Compose? (y/n): "; then
-                install_docker_compose
-            fi
-        else
-            log_success "✔ Docker Compose v$current_version уже установлен."
-        fi
-    fi
+    # Проверяем и устанавливаем Docker Compose
+    check_docker_compose
 }
 
 ensure_services() {
@@ -308,6 +322,11 @@ if [[ -f "$NGINX_CONF" ]]; then
         log_error "Конфигурация Nginx найдена, но каталог '${PROJECT_DIR}' отсутствует. Удалите $NGINX_CONF и повторите установку."
         exit 1
     fi
+    
+    # В режиме обновления также проверяем docker-compose
+    log_info "Проверка Docker Compose в режиме обновления..."
+    check_docker_compose
+    
     cd "$PROJECT_DIR"
     log_info "\nШаг 1: обновление исходного кода"
     git pull --ff-only
