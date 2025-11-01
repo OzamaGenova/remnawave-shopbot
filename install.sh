@@ -94,17 +94,53 @@ resolve_domain_ip() {
     return 1
 }
 
+install_docker_compose() {
+    log_info "Установка Docker Compose..."
+    
+    # Удаляем старую версию если установлена через apt
+    if dpkg -l | grep -q docker-compose; then
+        log_info "Удаление старой версии docker-compose..."
+        sudo apt-get remove -y docker-compose
+    fi
+    
+    # Устанавливаем последнюю версию Docker Compose
+    DOCKER_COMPOSE_VERSION=$(curl -fsSL https://api.github.com/repos/docker/compose/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+    
+    log_info "Установка Docker Compose v${DOCKER_COMPOSE_VERSION}..."
+    sudo curl -L "https://github.com/docker/compose/releases/download/${DOCKER_COMPOSE_VERSION}/docker-compose-$(uname -s)-$(uname -m)" \
+        -o /usr/local/bin/docker-compose
+    
+    sudo chmod +x /usr/local/bin/docker-compose
+    
+    # Создаем симлинк для совместимости
+    sudo ln -sf /usr/local/bin/docker-compose /usr/bin/docker-compose
+    
+    log_success "✔ Docker Compose v${DOCKER_COMPOSE_VERSION} установлен"
+}
+
 ensure_packages() {
     log_info "\nШаг 1: проверка и установка системных зависимостей"
+    
+    # Установка distutils для совместимости
+    if ! python3 -c "import distutils" 2>/dev/null; then
+        log_info "Установка python3-distutils для совместимости..."
+        export DEBIAN_FRONTEND=noninteractive
+        export DEBCONF_NONINTERACTIVE_SEEN=true
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends python3-distutils
+        unset DEBIAN_FRONTEND
+        unset DEBCONF_NONINTERACTIVE_SEEN
+    fi
+    
     declare -A packages=(
         [git]='git'
         [docker]='docker.io'
-        [docker-compose]='docker-compose'
-        [nginx]='nginx'
         [curl]='curl'
+        [nginx]='nginx'
         [certbot]='certbot'
         [dig]='dnsutils'
     )
+    
     local missing=()
     for cmd in "${!packages[@]}"; do
         if ! command -v "$cmd" >/dev/null 2>&1; then
@@ -114,19 +150,38 @@ ensure_packages() {
             log_success "✔ $cmd уже установлен."
         fi
     done
+    
     if ((${#missing[@]})); then
-        # Настройка debconf для неинтерактивной установки
         export DEBIAN_FRONTEND=noninteractive
         export DEBCONF_NONINTERACTIVE_SEEN=true
         
         sudo apt-get update
         sudo apt-get install -y --no-install-recommends "${missing[@]}"
         
-        # Сброс переменных после установки
         unset DEBIAN_FRONTEND
         unset DEBCONF_NONINTERACTIVE_SEEN
     else
         log_info "Все необходимые пакеты уже присутствуют."
+    fi
+    
+    # Устанавливаем Docker Compose отдельно
+    if ! command -v docker-compose >/dev/null 2>&1; then
+        install_docker_compose
+    else
+        # Проверяем версию и предлагаем обновление если старая
+        local current_version
+        current_version=$(docker-compose --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+        local latest_version
+        latest_version=$(curl -fsSL https://api.github.com/repos/docker/compose/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+        
+        if [[ "$current_version" != "$latest_version" ]]; then
+            log_warn "Установлена старая версия Docker Compose (v$current_version). Доступна v$latest_version"
+            if confirm "Обновить Docker Compose? (y/n): "; then
+                install_docker_compose
+            fi
+        else
+            log_success "✔ Docker Compose v$current_version уже установлен."
+        fi
     fi
 }
 
@@ -158,8 +213,7 @@ ensure_certbot_nginx() {
     fi
 
     if command -v apt-get >/dev/null 2>&1; then
-        log_info "Устанавливаю плагин python3-certbot-nginx (apt)..."
-        # Настройка debconf для неинтерактивной установки
+        log_info "Устанавливаю python3-certbot-nginx (apt)..."
         export DEBIAN_FRONTEND=noninteractive
         export DEBCONF_NONINTERACTIVE_SEEN=true
         
@@ -175,21 +229,18 @@ ensure_certbot_nginx() {
             log_warn "Не удалось установить python3-certbot-nginx через apt."
         fi
         
-        # Сброс переменных
         unset DEBIAN_FRONTEND
         unset DEBCONF_NONINTERACTIVE_SEEN
     fi
 
     log_warn "Пробую установить Certbot (snap) с поддержкой nginx."
     if ! command -v snap >/dev/null 2>&1; then
-        # Настройка debconf для неинтерактивной установки
         export DEBIAN_FRONTEND=noninteractive
         export DEBCONF_NONINTERACTIVE_SEEN=true
         
         sudo apt-get update
         sudo apt-get install -y --no-install-recommends snapd
         
-        # Сброс переменных
         unset DEBIAN_FRONTEND
         unset DEBCONF_NONINTERACTIVE_SEEN
     fi
